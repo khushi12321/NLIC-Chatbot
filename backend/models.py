@@ -2,7 +2,7 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import Date, desc
+from sqlalchemy import Date, desc, text, ForeignKeyConstraint
 
 from sqlalchemy import (
     Index,
@@ -386,3 +386,293 @@ class Claim(TimestampMixin, Base):
     submitted_on: Mapped[date] = mapped_column(Date, nullable=False)
     decided_on: Mapped[date | None] = mapped_column(Date)
 
+class OTPChallenge(Base):
+    __tablename__ = "otp_challenges"
+
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "id", "policy_id",
+            name="uq_otp_challenges_id_policy",
+        ),
+        CheckConstraint(
+            "mode IN ('email', 'mock')",
+            name="ck_otp_challenges_mode",
+        ),
+        CheckConstraint(
+            "attempt_count BETWEEN 0 AND max_attempts",
+            name="ck_otp_challenges_attempt_count",
+        ),
+        CheckConstraint(
+            "expires_at > created_at",
+            name="ck_otp_challenges_expiry",
+        ),
+        Index(
+            "ix_otp_challenges_policy_created",
+            "policy_id",
+            desc("created_at"),
+        ),
+        Index(
+            "ix_otp_challenges_expires_at",
+            "expires_at",
+        ),
+        Index(
+            "uq_otp_challenges_one_active_per_policy",
+            "policy_id",
+            unique=True,
+            postgresql_where=text(
+                "consumed_at IS NULL AND invalidated_at IS NULL"
+            ),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    policy_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mock_policies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    otp_hash: Mapped[str] = mapped_column(Text, nullable=False)
+
+    mode: Mapped[str] = mapped_column(Text, nullable=False)
+
+    expires_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now() + interval '5 minutes'"),
+    )
+
+    attempt_count: Mapped[int] = mapped_column(
+        SmallInteger,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
+    max_attempts: Mapped[int] = mapped_column(
+        SmallInteger,
+        nullable=False,
+        default=5,
+        server_default="5",
+    )
+
+    consumed_at: Mapped[DateTime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
+    invalidated_at: Mapped[DateTime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
+    send_count: Mapped[int] = mapped_column(
+        SmallInteger,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
+    last_sent_at: Mapped[DateTime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
+    delivery_status: Mapped[str | None] = mapped_column(Text)
+
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "id", "policy_id",
+            name="uq_auth_sessions_id_policy",
+        ),
+        UniqueConstraint(
+            "otp_challenge_id",
+            name="uq_auth_sessions_otp_challenge",
+        ),
+        CheckConstraint(
+            "expires_at > created_at",
+            name="ck_auth_sessions_expiry",
+        ),
+        ForeignKeyConstraint(
+            ["otp_challenge_id", "policy_id"],
+            ["otp_challenges.id", "otp_challenges.policy_id"],
+            name="fk_auth_sessions_challenge_policy",
+            ondelete="SET NULL (otp_challenge_id)",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    token_hash: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        unique=True,
+    )
+
+    policy_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mock_policies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    otp_challenge_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True)
+    )
+
+    csrf_token_hash: Mapped[str] = mapped_column(Text, nullable=False)
+
+    expires_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now() + interval '15 minutes'"),
+    )
+
+    last_seen_at: Mapped[DateTime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
+    revoked_at: Mapped[DateTime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
+
+class SupportTicket(TimestampMixin, Base):
+    __tablename__ = "support_tickets"
+
+    __table_args__ = (
+        CheckConstraint(
+            "category IN ('general_inquiry', 'policy_issue', 'claim', "
+            "'premium_payment', 'document_issue', 'complaint', 'technical', 'other')",
+            name="ck_support_tickets_category",
+        ),
+        CheckConstraint(
+            "contact_method IN ('email', 'phone')",
+            name="ck_support_tickets_contact_method",
+        ),
+        CheckConstraint(
+            "status IN ('open', 'in_progress', 'resolved', 'closed')",
+            name="ck_support_tickets_status",
+        ),
+        CheckConstraint(
+            "priority IN ('low', 'normal', 'high', 'urgent')",
+            name="ck_support_tickets_priority",
+        ),
+        CheckConstraint(
+            "length(trim(issue_summary)) BETWEEN 1 AND 2000",
+            name="ck_support_tickets_issue_summary_length",
+        ),
+        CheckConstraint(
+            "resolved_at IS NULL OR resolved_at >= created_at",
+            name="ck_support_tickets_resolved_at",
+        ),
+        Index("ix_support_tickets_status_priority_created", "status", "priority", "created_at"),
+        Index("ix_support_tickets_category", "category"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    ticket_reference: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    idempotency_key: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, unique=True
+    )
+    category: Mapped[str] = mapped_column(Text, nullable=False)
+    issue_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    customer_name: Mapped[str] = mapped_column(Text, nullable=False)
+    contact_method: Mapped[str] = mapped_column(Text, nullable=False)
+    contact_value: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="open", server_default="open"
+    )
+    priority: Mapped[str] = mapped_column(
+        Text, nullable=False, default="normal", server_default="normal"
+    )
+    question_excerpt: Mapped[str | None] = mapped_column(Text)
+    related_policy_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mock_policies.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    resolved_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+
+
+class DocumentRequest(Base):
+    __tablename__ = "document_requests"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "id", "policy_id", name="uq_document_requests_id_policy"
+        ),
+        CheckConstraint(
+            "document_type IN ('premium_receipt', 'tax_certificate', 'policy_bond')",
+            name="ck_document_requests_document_type",
+        ),
+        CheckConstraint(
+            "status IN ('requested', 'generated', 'delivered', 'failed')",
+            name="ck_document_requests_status",
+        ),
+        ForeignKeyConstraint(
+            ["auth_session_id", "policy_id"],
+            ["auth_sessions.id", "auth_sessions.policy_id"],
+            name="fk_document_requests_session_policy",
+            ondelete="SET NULL (auth_session_id)",
+        ),
+        ForeignKeyConstraint(
+            ["payment_id", "policy_id"],
+            ["premium_payments.id", "premium_payments.policy_id"],
+            name="fk_document_requests_payment_policy",
+            ondelete="SET NULL (payment_id)",
+        ),
+        Index(
+            "ix_document_requests_policy_requested",
+            "policy_id",
+            desc("requested_at"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    policy_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mock_policies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    auth_session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    payment_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    document_type: Mapped[str] = mapped_column(Text, nullable=False)
+    fiscal_year: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="requested", server_default="requested"
+    )
+    delivery_destination_masked: Mapped[str | None] = mapped_column(Text)
+    failure_code: Mapped[str | None] = mapped_column(Text)
+    requested_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    generated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    delivered_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
