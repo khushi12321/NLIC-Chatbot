@@ -1,4 +1,8 @@
 import uuid
+from datetime import date
+from decimal import Decimal
+
+from sqlalchemy import Date, desc
 
 from sqlalchemy import (
     Index,
@@ -231,3 +235,154 @@ class FAQ(TimestampMixin, Base):
     )
     reviewed_by: Mapped[str | None] = mapped_column(Text)
     reviewed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MockPolicy(TimestampMixin, Base):
+    __tablename__ = "mock_policies"
+
+    __table_args__ = (
+        CheckConstraint("sum_assured > 0", name="ck_mock_policies_sum_assured"),
+        CheckConstraint("premium_amount >= 0", name="ck_mock_policies_premium_amount"),
+        CheckConstraint(
+            "maturity_date >= policy_start_date",
+            name="ck_mock_policies_maturity_date",
+        ),
+        CheckConstraint(
+            "premium_due_date IS NULL OR premium_due_date >= policy_start_date",
+            name="ck_mock_policies_due_date",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'lapsed', 'matured', 'surrendered', 'terminated')",
+            name="ck_mock_policies_status",
+        ),
+        CheckConstraint("is_mock = TRUE", name="ck_mock_policies_is_mock"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    policy_number: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    customer_name: Mapped[str] = mapped_column(Text, nullable=False)
+    date_of_birth: Mapped[date] = mapped_column(Date, nullable=False)
+    registered_email: Mapped[str] = mapped_column(Text, nullable=False)
+    registered_phone: Mapped[str | None] = mapped_column(Text)
+
+    plan_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("plans.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    sum_assured: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    premium_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    premium_mode: Mapped[str] = mapped_column(Text, nullable=False)
+
+    policy_start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    maturity_date: Mapped[date] = mapped_column(Date, nullable=False)
+    premium_due_date: Mapped[date | None] = mapped_column(Date)
+
+    is_mock: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+
+class PremiumPayment(Base):
+    __tablename__ = "premium_payments"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "id",
+            "policy_id",
+            name="uq_premium_payments_id_policy",
+        ),
+        CheckConstraint("amount >= 0", name="ck_premium_payments_amount"),
+        CheckConstraint(
+            "period_to >= period_from",
+            name="ck_premium_payments_period",
+        ),
+        Index(
+            "ix_premium_payments_policy_id_paid_on",
+            "policy_id",
+            desc("paid_on"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    policy_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mock_policies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    receipt_number: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    paid_on: Mapped[date] = mapped_column(Date, nullable=False)
+    period_from: Mapped[date] = mapped_column(Date, nullable=False)
+    period_to: Mapped[date] = mapped_column(Date, nullable=False)
+
+    payment_method: Mapped[str | None] = mapped_column(Text)
+    fiscal_year: Mapped[str] = mapped_column(Text, nullable=False)
+
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+class Claim(TimestampMixin, Base):
+    __tablename__ = "claims"
+
+    __table_args__ = (
+        CheckConstraint(
+            "claim_type IN "
+            "('maturity', 'death', 'accidental_death', "
+            "'critical_illness', 'disability', 'surrender')",
+            name="ck_claims_claim_type",
+        ),
+        CheckConstraint(
+            "status IN "
+            "('submitted', 'under_review', 'additional_info_required', "
+            "'approved', 'rejected', 'paid')",
+            name="ck_claims_status",
+        ),
+        CheckConstraint(
+            "claimed_amount IS NULL OR claimed_amount >= 0",
+            name="ck_claims_claimed_amount",
+        ),
+        CheckConstraint(
+            "approved_amount IS NULL OR approved_amount >= 0",
+            name="ck_claims_approved_amount",
+        ),
+        CheckConstraint(
+            "decided_on IS NULL OR decided_on >= submitted_on",
+            name="ck_claims_decided_on",
+        ),
+        Index(
+            "ix_claims_policy_id_submitted_on",
+            "policy_id",
+            desc("submitted_on"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    policy_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mock_policies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    claim_reference: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    claim_type: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    status_note: Mapped[str | None] = mapped_column(Text)
+
+    claimed_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    approved_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+
+    submitted_on: Mapped[date] = mapped_column(Date, nullable=False)
+    decided_on: Mapped[date | None] = mapped_column(Date)
+
