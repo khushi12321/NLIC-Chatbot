@@ -1,5 +1,5 @@
 import uuid
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import Date, desc, text, ForeignKeyConstraint
@@ -12,7 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Numeric,
     SmallInteger,
-    String,
+    Sequence,
     Text,
     UniqueConstraint,
     func,
@@ -25,14 +25,18 @@ class Base(DeclarativeBase):
     pass
 
 
+# The migration must create generate_support_ticket_reference() in PostgreSQL.
+# That function creates/uses a sequence for the current year and returns NLIC-YYYY-NNNN.
+
+
 class TimestampMixin:
-    created_at: Mapped[DateTime] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
     )
 
-    updated_at: Mapped[DateTime] = mapped_column(
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
@@ -94,7 +98,7 @@ class Plan(TimestampMixin, Base):
     is_with_profit: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
     purpose_tags: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
-    min_sum_assured: Mapped[float | None] = mapped_column(Numeric(14, 2))
+    min_sum_assured: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     max_sum_assured_rule: Mapped[str | None] = mapped_column(Text)
 
     proposer_entry_age_min: Mapped[int | None] = mapped_column(SmallInteger)
@@ -115,15 +119,15 @@ class Plan(TimestampMixin, Base):
     surrender_min_years: Mapped[int | None] = mapped_column(SmallInteger)
     loan_rule: Mapped[str | None] = mapped_column(Text)
     loan_min_years: Mapped[int | None] = mapped_column(SmallInteger)
-    loan_max_pct_surrender_value: Mapped[float | None] = mapped_column(Numeric(5, 2))
-    loan_max_pct_sum_assured: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    loan_max_pct_surrender_value: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    loan_max_pct_sum_assured: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
 
     source_file: Mapped[str] = mapped_column(Text, nullable=False)
     verification_status: Mapped[str] = mapped_column(
         Text, nullable=False, default="draft", server_default="draft"
     )
     verified_by: Mapped[str | None] = mapped_column(Text)
-    verified_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class PlanRider(TimestampMixin, Base):
@@ -200,7 +204,7 @@ class PlanScenario(TimestampMixin, Base):
         Text, nullable=False, default="draft", server_default="draft"
     )
     verified_by: Mapped[str | None] = mapped_column(Text)
-    verified_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class FAQ(TimestampMixin, Base):
@@ -234,7 +238,7 @@ class FAQ(TimestampMixin, Base):
         Text, nullable=False, default="draft", server_default="draft"
     )
     reviewed_by: Mapped[str | None] = mapped_column(Text)
-    reviewed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class MockPolicy(TimestampMixin, Base):
@@ -325,7 +329,7 @@ class PremiumPayment(Base):
     payment_method: Mapped[str | None] = mapped_column(Text)
     fiscal_year: Mapped[str] = mapped_column(Text, nullable=False)
 
-    created_at: Mapped[DateTime] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
@@ -386,10 +390,11 @@ class Claim(TimestampMixin, Base):
     submitted_on: Mapped[date] = mapped_column(Date, nullable=False)
     decided_on: Mapped[date | None] = mapped_column(Date)
 
+
 class OTPChallenge(Base):
     __tablename__ = "otp_challenges"
 
-    created_at: Mapped[DateTime] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
@@ -445,7 +450,7 @@ class OTPChallenge(Base):
 
     mode: Mapped[str] = mapped_column(Text, nullable=False)
 
-    expires_at: Mapped[DateTime] = mapped_column(
+    expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=text("now() + interval '5 minutes'"),
@@ -465,11 +470,11 @@ class OTPChallenge(Base):
         server_default="5",
     )
 
-    consumed_at: Mapped[DateTime | None] = mapped_column(
+    consumed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
 
-    invalidated_at: Mapped[DateTime | None] = mapped_column(
+    invalidated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
 
@@ -480,7 +485,7 @@ class OTPChallenge(Base):
         server_default="0",
     )
 
-    last_sent_at: Mapped[DateTime | None] = mapped_column(
+    last_sent_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
 
@@ -490,7 +495,7 @@ class OTPChallenge(Base):
 class AuthSession(Base):
     __tablename__ = "auth_sessions"
 
-    created_at: Mapped[DateTime] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
@@ -539,17 +544,17 @@ class AuthSession(Base):
 
     csrf_token_hash: Mapped[str] = mapped_column(Text, nullable=False)
 
-    expires_at: Mapped[DateTime] = mapped_column(
+    expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=text("now() + interval '15 minutes'"),
     )
 
-    last_seen_at: Mapped[DateTime | None] = mapped_column(
+    last_seen_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
 
-    revoked_at: Mapped[DateTime | None] = mapped_column(
+    revoked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
 
@@ -580,6 +585,18 @@ class SupportTicket(TimestampMixin, Base):
             name="ck_support_tickets_issue_summary_length",
         ),
         CheckConstraint(
+            "length(trim(customer_name)) BETWEEN 1 AND 200",
+            name="ck_support_tickets_customer_name_length",
+        ),
+        CheckConstraint(
+            "length(trim(contact_value)) BETWEEN 1 AND 320",
+            name="ck_support_tickets_contact_value_length",
+        ),
+        CheckConstraint(
+            "question_excerpt IS NULL OR length(question_excerpt) <= 1000",
+            name="ck_support_tickets_question_excerpt_length",
+        ),
+        CheckConstraint(
             "resolved_at IS NULL OR resolved_at >= created_at",
             name="ck_support_tickets_resolved_at",
         ),
@@ -590,7 +607,12 @@ class SupportTicket(TimestampMixin, Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    ticket_reference: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    ticket_reference: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        unique=True,
+        server_default=text("generate_support_ticket_reference()"),
+    )
     idempotency_key: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False, unique=True
     )
@@ -611,16 +633,13 @@ class SupportTicket(TimestampMixin, Base):
         ForeignKey("mock_policies.id", ondelete="SET NULL"),
         nullable=True,
     )
-    resolved_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class DocumentRequest(Base):
     __tablename__ = "document_requests"
 
     __table_args__ = (
-        UniqueConstraint(
-            "id", "policy_id", name="uq_document_requests_id_policy"
-        ),
         CheckConstraint(
             "document_type IN ('premium_receipt', 'tax_certificate', 'policy_bond')",
             name="ck_document_requests_document_type",
@@ -641,6 +660,12 @@ class DocumentRequest(Base):
             name="fk_document_requests_payment_policy",
             ondelete="SET NULL (payment_id)",
         ),
+        ForeignKeyConstraint(
+            ["ticket_id"],
+            ["support_tickets.id"],
+            name="fk_document_requests_ticket_id",
+            ondelete="SET NULL",
+        ),
         Index(
             "ix_document_requests_policy_requested",
             "policy_id",
@@ -653,11 +678,12 @@ class DocumentRequest(Base):
     )
     policy_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("mock_policies.id", ondelete="CASCADE"),
+        ForeignKey("mock_policies.id", ondelete="RESTRICT"),
         nullable=False,
     )
     auth_session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     payment_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    ticket_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     document_type: Mapped[str] = mapped_column(Text, nullable=False)
     fiscal_year: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(
@@ -665,12 +691,12 @@ class DocumentRequest(Base):
     )
     delivery_destination_masked: Mapped[str | None] = mapped_column(Text)
     failure_code: Mapped[str | None] = mapped_column(Text)
-    requested_at: Mapped[DateTime] = mapped_column(
+    requested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-    generated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
-    delivered_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
-    updated_at: Mapped[DateTime] = mapped_column(
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
